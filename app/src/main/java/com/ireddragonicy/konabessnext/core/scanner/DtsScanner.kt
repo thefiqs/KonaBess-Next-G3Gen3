@@ -231,7 +231,12 @@ object DtsScanner {
         val parts = mutableListOf<String>()
         
         if (!result.gpuModel.isNullOrBlank()) {
-            parts.add(result.gpuModel)
+            parts.add(
+                when {
+                    result.gpuModel.equals("Adreno33v2", ignoreCase = true) -> "SD G3 Gen 3"
+                    else -> result.gpuModel
+                }
+            )
         } else if (!result.chipId.isNullOrBlank()) {
             val chipIdLong = if (result.chipId.startsWith("0x", true)) result.chipId.substring(2).toLongOrNull(16) else result.chipId.toLongOrNull()
             if (chipIdLong != null) {

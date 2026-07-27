@@ -457,6 +457,11 @@ open class DeviceRepository @Inject constructor(
         return output.map { sanitizeString(it) }.filter { it.isNotEmpty() }
     }
 
+    private suspend fun getRunningGpuModel(): String {
+        val output = shellRepository.execForOutput("cat /sys/class/kgsl/kgsl-3d0/gpu_model")
+        return sanitizeString(output.joinToString(" "))
+    }
+
     override suspend fun getRunTimeGpuFrequencies(): DomainResult<List<Long>> = withContext(Dispatchers.IO) {
         val probeCommands = listOf(
             "cat /sys/class/kgsl/kgsl-3d0/frequencies",
@@ -834,10 +839,15 @@ open class DeviceRepository @Inject constructor(
 
             val runningModel = if (isRootMode) getRunningDeviceTreeModel() else ""
             val runningCompatibles = if (isRootMode) getRunningCompatibleStrings() else emptyList()
+            val runningGpuModel = if (isRootMode) getRunningGpuModel() else ""
             activeDtbIdByPartition[partition] = -1
 
             val count = getDtbCount(partition)
             var parseFailures = 0
+            var gpuModelMatchedDtbId = -1
+            var bestCompatibleDtbId = -1
+            var bestCompatibleScore = 0
+            var modelMatchedDtbId = -1
             for (i in 0 until count) {
                 val dtsFile = File(workDir, "$i.dts")
                 if (!dtsFile.exists()) continue
@@ -853,25 +863,34 @@ open class DeviceRepository @Inject constructor(
                         dtsCompatibles.add(compMatcher.group(1) ?: "")
                     }
 
-                    if (activeDtbIdByPartition[partition] == -1) {
-                        if (runningCompatibles.intersect(dtsCompatibles.toSet()).isNotEmpty()) {
-                            activeDtbIdByPartition[partition] = i
-                        } else if (runningModel.isNotEmpty() && dtsModel.isNotEmpty() &&
-                            (dtsModel.contains(runningModel, true) || runningModel.contains(dtsModel, true))
-                        ) {
-                            activeDtbIdByPartition[partition] = i
-                        }
+                    // A multi-DTB image often has the same generic SoC compatible
+                    // in every entry. Score all exact matches so board-specific
+                    // compatibles can beat an earlier generic-only match.
+                    val compatibleScore = runningCompatibles.toSet()
+                        .intersect(dtsCompatibles.toSet())
+                        .size
+                    if (compatibleScore > bestCompatibleScore) {
+                        bestCompatibleScore = compatibleScore
+                        bestCompatibleDtbId = i
+                    }
+                    if (modelMatchedDtbId == -1 &&
+                        runningModel.isNotEmpty() && dtsModel.isNotEmpty() &&
+                        (dtsModel.contains(runningModel, true) || runningModel.contains(dtsModel, true))
+                    ) {
+                        modelMatchedDtbId = i
                     }
 
                     Log.d(TAG, "Running smart detection for DTB $i...")
                     val scanResult = DtsScanner.scanContent(content, i)
+                    if (gpuModelMatchedDtbId == -1 &&
+                        runningGpuModel.isNotEmpty() &&
+                        scanResult.gpuModel?.equals(runningGpuModel, ignoreCase = true) == true
+                    ) {
+                        gpuModelMatchedDtbId = i
+                    }
 
                     val def = if (scanResult.isValid) {
-                        val smartDef = DtsScanner.toChipDefinition(scanResult)
-                        if (activeDtbIdByPartition[partition] == i) {
-                            saveCustomDefinition(smartDef)
-                        }
-                        smartDef
+                        DtsScanner.toChipDefinition(scanResult)
                     } else {
                         createGenericPlaceholder(i, content, dtsModel)
                     }
@@ -881,9 +900,18 @@ open class DeviceRepository @Inject constructor(
                     Log.e(TAG, "Error checking DTB $i: ${e.message}")
                 }
             }
+            activeDtbIdByPartition[partition] = when {
+                gpuModelMatchedDtbId != -1 -> gpuModelMatchedDtbId
+                bestCompatibleDtbId != -1 -> bestCompatibleDtbId
+                modelMatchedDtbId != -1 -> modelMatchedDtbId
+                else -> -1
+            }
             if (activeDtbIdByPartition[partition] == -1 && count == 1) {
                 activeDtbIdByPartition[partition] = 0
             }
+            partitionDtbs
+                .firstOrNull { it.id == activeDtbIdByPartition[partition] && it.type.id.startsWith("custom") }
+                ?.let { saveCustomDefinition(it.type) }
 
             if (partitionDtbs.isEmpty()) {
                 if (partition == TargetPartition.DTBO) {
