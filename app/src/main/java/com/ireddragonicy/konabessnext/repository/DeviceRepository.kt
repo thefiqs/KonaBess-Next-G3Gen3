@@ -80,6 +80,15 @@ open class DeviceRepository @Inject constructor(
     private val dtbTypeByPartition: MutableMap<TargetPartition, DtbType?> = HashMap()
     private val importedDtsPathsByPartition: MutableMap<TargetPartition, HashMap<Int, String>> = HashMap()
 
+    init {
+        val savedName = prefs.getString("custom_def_name", null)
+        val storedLevelCount = prefs.getInt("custom_def_level_count", 0)
+        val supportedLevelCount = LevelPresets.inferSupportedLevelCount(savedName)
+        if (supportedLevelCount != null && storedLevelCount in 1 until supportedLevelCount) {
+            prefs.edit().putInt("custom_def_level_count", supportedLevelCount).apply()
+        }
+    }
+
     var bootName: String? = null
         private set
     var dtbs: MutableList<Dtb>
@@ -172,7 +181,17 @@ open class DeviceRepository @Inject constructor(
         val strategy = prefs.getString("custom_def_strategy", "MULTI_BIN") ?: "MULTI_BIN"
         val pattern = prefs.getString("custom_def_pattern", null)
         val maxLevels = prefs.getInt("custom_def_max_levels", 15)
-        val levelCount = prefs.getInt("custom_def_level_count", 480)
+        val storedLevelCount = prefs.getInt("custom_def_level_count", 480)
+        // Definitions saved by the first dynamic-scanner release used the
+        // highest stock qcom,level value as the editor ceiling. Expand those
+        // cached definitions to the chipset family's supported range.
+        val levelCount = maxOf(
+            storedLevelCount,
+            LevelPresets.inferSupportedLevelCount(name) ?: storedLevelCount
+        )
+        if (levelCount != storedLevelCount) {
+            prefs.edit().putInt("custom_def_level_count", levelCount).apply()
+        }
         val ignoreVolt = prefs.getBoolean("custom_def_ignore_volt", false)
         
         return ChipDefinition(

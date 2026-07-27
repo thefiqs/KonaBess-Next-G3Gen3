@@ -187,7 +187,7 @@ object LevelPresets {
         // Sun / Canoe — ultra-granulated sub-levels
         Regex("""(?i)\b(Sun|Canoe)\b""") to "sun_480",
         // Pineapple — shifted MIN_SVS
-        Regex("""(?i)\bPineapple\b""") to "pineapple_480",
+        Regex("""(?i)\bPineappleP?\b""") to "pineapple_480",
         // Kalama / KalamaP / Tuna — kalama-style 480
         Regex("""(?i)\b(Kalama|Tuna)\b""") to "kalama_480",
         // Lahaina — legacy super_turbo naming at 464
@@ -195,6 +195,28 @@ object LevelPresets {
         // Known 416-level chipsets by codename
         Regex("""(?i)\b(kona|msmnile|Lito|Lagoon|Shima|Yupik|Waipio|Cape|Diwali|Ukee|Montague|Parrot|Ravelin)\b""") to "standard_416",
     )
+
+    private val PRESET_LEVEL_COUNTS = mapOf(
+        "standard_416" to 416,
+        "cliffs_minimal" to 416,
+        "lahaina_464" to 464,
+        "kalama_480" to 480,
+        "pineapple_480" to 480,
+        "sun_480" to 480,
+        "alor_480" to 480
+    )
+
+    /**
+     * Returns the full editor range for a recognized chipset family,
+     * independently of the highest voltage level used by its stock table.
+     */
+    fun inferSupportedLevelCount(detectedModel: String?): Int? {
+        if (detectedModel.isNullOrBlank()) return null
+        val preset = MODEL_PATTERNS.firstNotNullOfOrNull { (pattern, name) ->
+            name.takeIf { pattern.containsMatchIn(detectedModel) }
+        } ?: return null
+        return PRESET_LEVEL_COUNTS[preset]
+    }
 
     /**
      * Infer the best level preset for a dynamically detected chip.

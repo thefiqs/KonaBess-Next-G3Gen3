@@ -128,7 +128,14 @@ object DtsScanner {
             }
         }
         
-        val levelCount = if (maxLevelValue > 0) maxLevelValue else 480
+        // The highest stock qcom,level is the current operating point, not
+        // the chipset's editor ceiling (Pineapple may use 388 but supports 480).
+        val familyLevelCount = LevelPresets.inferSupportedLevelCount(detectedModel)
+        val levelCount = when {
+            familyLevelCount != null -> maxOf(familyLevelCount, maxLevelValue)
+            maxLevelValue > 0 -> maxLevelValue
+            else -> 480
+        }
         val maxTableLevels = if (maxLevelsCount > 0) maxLevelsCount else 15
 
         // 5. Voltage Table Pattern Detection (OPP table style)
